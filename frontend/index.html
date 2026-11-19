@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>URL Shortener</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>URL Shortener</h1>
+      <p class="tagline">Shorten long links into short, shareable URLs</p>
+    </header>
+
+    <section class="card">
+      <form id="shortenForm">
+        <label for="longUrl">Long URL</label>
+        <input
+          type="url"
+          id="longUrl"
+          name="longUrl"
+          placeholder="https://example.com/some/very/long/url"
+          required
+        />
+        <button type="submit" id="submitBtn">Shorten</button>
+      </form>
+
+      <div id="result" class="result hidden">
+        <div class="result-header">
+          <span class="result-label">Short URL</span>
+          <button id="copyBtn">Copy</button>
+        </div>
+        <input
+          type="text"
+          id="shortUrl"
+          class="short-url-input"
+          readonly
+          spellcheck="false"
+        />
+        <p id="status" class="status"></p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Recent Links</h2>
+      <ul id="linksList">
+        <li class="empty">No links yet. Shorten your first URL above.</li>
+      </ul>
+    </section>
+
+    <footer>
+      <p>&copy; 2026 URL Shortener. Built for DevOps project.</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
