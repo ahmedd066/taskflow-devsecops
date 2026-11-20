@@ -15,7 +15,7 @@ beforeAll((done) => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         clicks INTEGER DEFAULT 0
       )`,
-      done
+      done,
     );
   });
 });
