@@ -22,7 +22,7 @@ router.get('/urls', (_req, res) => {
         return res.status(500).json({ error: 'Database error' });
       }
       return res.status(200).json(rows);
-    }
+    },
   );
 });
 
@@ -57,7 +57,7 @@ router.post('/shorten', (req, res) => {
           long_url: long_url.trim(),
           short_url,
         });
-      }
+      },
     );
   };
 

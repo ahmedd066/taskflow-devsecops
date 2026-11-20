@@ -15,7 +15,7 @@ beforeAll((done) => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         clicks INTEGER DEFAULT 0
       )`,
-      done
+      done,
     );
   });
 });
@@ -33,21 +33,18 @@ describe('GET /:code', () => {
 
   it('should redirect 302 to the long URL for a valid short code', async () => {
     const longUrl = 'https://example.com/target-page';
-    const insertRes = await new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       db.run(
         'INSERT INTO urls (code, long_url, clicks) VALUES (?, ?, ?)',
         ['abc123', longUrl, 0],
         function (err) {
           if (err) return reject(err);
           resolve(this);
-        }
+        },
       );
     });
 
-    const res = await request(app)
-      .get('/abc123')
-      .redirects(0)
-      .expect(302);
+    const res = await request(app).get('/abc123').redirects(0).expect(302);
 
     expect(res.headers.location).toBe(longUrl);
   });
@@ -60,7 +57,7 @@ describe('GET /:code', () => {
         function (err) {
           if (err) return reject(err);
           resolve(this);
-        }
+        },
       );
     });
 
@@ -73,10 +70,7 @@ describe('GET /:code', () => {
   });
 
   it('should return 404 for an unknown short code', async () => {
-    const res = await request(app)
-      .get('/nonexistent')
-      .redirects(0)
-      .expect(404);
+    const res = await request(app).get('/nonexistent').redirects(0).expect(404);
 
     expect(res.body.error).toBeDefined();
   });
@@ -84,10 +78,7 @@ describe('GET /:code', () => {
 
 describe('GET /health', () => {
   it('should return 200 with status ok', async () => {
-    const res = await request(app)
-      .get('/health')
-      .expect('Content-Type', /json/)
-      .expect(200);
+    const res = await request(app).get('/health').expect('Content-Type', /json/).expect(200);
 
     expect(res.body.status).toBe('ok');
     expect(res.body.service).toBe('url-shortener-backend');
