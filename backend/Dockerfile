@@ -9,7 +9,9 @@ FROM node:22-alpine AS runtime
 
 WORKDIR /app
 
-RUN addgroup --system --gid 1001 appgroup && \
+# npm is needed in the build stage, but not to run the application.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx && \
+    addgroup --system --gid 1001 appgroup && \
     adduser --system --uid 1001 --ingroup appgroup appuser
 
 COPY --from=builder /app/node_modules ./node_modules
