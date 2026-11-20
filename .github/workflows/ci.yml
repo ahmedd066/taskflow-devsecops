@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Scan repository history for secrets
-        uses: zricethezav/gitleaks-action@v2.3.9
+        uses: zricethezav/gitleaks-action@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: 'false'
