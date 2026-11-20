@@ -63,10 +63,14 @@ describe('GET /:code', () => {
 
     await request(app).get('/xyz789').redirects(0).expect(302);
 
-    db.get('SELECT clicks FROM urls WHERE code = ?', ['xyz789'], (err, row) => {
-      expect(err).toBeNull();
-      expect(row.clicks).toBe(6);
+    const row = await new Promise((resolve, reject) => {
+      db.get('SELECT clicks FROM urls WHERE code = ?', ['xyz789'], (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      });
     });
+
+    expect(row.clicks).toBe(6);
   });
 
   it('should return 404 for an unknown short code', async () => {
