@@ -171,18 +171,20 @@ jobs:
       - name: Load images for scanning
         run: docker load --input images.tar
       - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: taskflow-backend:ci
+          version: v0.76.2
           format: table
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: os,library
           severity: HIGH,CRITICAL
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: taskflow-frontend:ci
+          version: v0.76.2
           format: table
           exit-code: '1'
           ignore-unfixed: true

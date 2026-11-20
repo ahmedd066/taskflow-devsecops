@@ -5,9 +5,10 @@ WORKDIR /app
 COPY . .
 RUN test -f index.html && test -f style.css && test -f app.js
 
-FROM nginx:1.25-alpine AS runtime
+FROM nginx:1.29.8-alpine3.23 AS runtime
 
-RUN addgroup --system --gid 1001 appgroup && \
+RUN apk upgrade --no-cache && \
+    addgroup --system --gid 1001 appgroup && \
     adduser --system --uid 1001 --ingroup appgroup appuser && \
     chown -R appuser:appgroup /var/cache/nginx && \
     chown -R appuser:appgroup /var/log/nginx && \
