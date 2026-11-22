@@ -4,6 +4,8 @@
 # Runs on instance boot via Launch Template
 # Pulls Docker images from ECR and starts the application stack
 #
+# IMAGE_TAG is injected by CD pipeline when creating new Launch Template version
+# Do not set a default value — ECR uses IMMUTABLE tags, so each deploy must use a unique tag (git SHA)
 
 set -euo pipefail
 
@@ -14,10 +16,10 @@ AWS_REGION="ap-southeast-2"
 AWS_ACCOUNT_ID="078852546033"
 ECR_BACKEND_REPO="url-shortener-backend"
 ECR_FRONTEND_REPO="url-shortener-frontend"
-# Image tag to deploy (updated by CD pipeline via Launch Template version)
-IMAGE_TAG="${IMAGE_TAG:-latest}"
+# IMAGE_TAG is provided at runtime via Launch Template user data (no default)
+# Expected format: sha-<git-short-sha> or v<semver>
 
-# Derived values
+# Derived values (IMAGE_TAG will be set at runtime)
 ECR_BACKEND_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_BACKEND_REPO}"
 ECR_FRONTEND_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_FRONTEND_REPO}"
 COMPOSE_FILE="/opt/taskflow/docker-compose.yml"
@@ -32,9 +34,9 @@ echo "=== TaskFlow User Data Started at $(date) ==="
 # =============================================================================
 # INSTALL DEPENDENCIES
 # =============================================================================
-echo "Installing Docker, Docker Compose, AWS CLI v2..."
+echo "Installing Docker, Docker Compose, AWS CLI v2, curl..."
 dnf update -y
-dnf install -y docker jq unzip
+dnf install -y docker jq unzip curl
 
 # Install Docker Compose v2 (plugin)
 mkdir -p /usr/local/lib/docker/cli-plugins
@@ -58,6 +60,16 @@ dnf install -y amazon-cloudwatch-agent
 echo "Dependencies installed."
 
 # =============================================================================
+# VALIDATE REQUIRED VARIABLES
+# =============================================================================
+if [[ -z "${IMAGE_TAG:-}" ]]; then
+  echo "ERROR: IMAGE_TAG environment variable not set."
+  echo "CD pipeline must inject IMAGE_TAG when creating Launch Template version."
+  exit 1
+fi
+echo "Using image tag: ${IMAGE_TAG}"
+
+# =============================================================================
 # CREATE APPLICATION DIRECTORY
 # =============================================================================
 mkdir -p /opt/taskflow
@@ -79,7 +91,7 @@ services:
     volumes:
       - urlshortener_data:/app/data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { if (res.statusCode !== 200) process.exit(1) }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -140,6 +152,9 @@ echo "Environment file written to ${ENV_FILE}"
 # =============================================================================
 # CONFIGURE CLOUDWATCH AGENT
 # =============================================================================
+# Note: EC2 instance role (TaskFlow-EC2-SSM-Role) must have permissions:
+# - logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents (for awslogs driver + CW Agent)
+# - ssm:GetParameter (if using SSM for config)
 cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CW_EOF'
 {
   "logs": {
@@ -178,11 +193,14 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CW_EO
 }
 CW_EOF
 
+# Ensure log group exists (awslogs driver will create streams, but group must exist)
+aws logs create-log-group --log-group-name /aws/ec2/url-shortener --region "${AWS_REGION}" 2>/dev/null || true
+
 # Start CloudWatch Agent
 /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
   -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
 
-echo "CloudWatch Agent configured and started."
+echo "CloudWatch Agent configured and started. Log group ensured."
 
 # =============================================================================
 # ECR LOGIN AND PULL IMAGES
@@ -192,13 +210,20 @@ aws ecr get-login-password --region "${AWS_REGION}" | \
   docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 echo "Pulling Docker images (tag: ${IMAGE_TAG})..."
-docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
+if ! docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull; then
+  echo "ERROR: Failed to pull Docker images. Check ECR permissions and image tag."
+  exit 1
+fi
 
 # =============================================================================
 # START APPLICATION STACK
 # =============================================================================
 echo "Starting application stack..."
-docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d
+if ! docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d; then
+  echo "ERROR: Failed to start containers."
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs
+  exit 1
+fi
 
 # =============================================================================
 # WAIT FOR HEALTH CHECKS
