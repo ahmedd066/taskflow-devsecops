@@ -36,7 +36,7 @@ echo "=== TaskFlow User Data Started at $(date) ==="
 # =============================================================================
 echo "Installing Docker, Docker Compose, AWS CLI v2, curl..."
 dnf update -y
-dnf install -y docker jq unzip curl
+dnf install -y docker jq unzip
 
 # Install Docker Compose v2 (plugin)
 mkdir -p /usr/local/lib/docker/cli-plugins
