@@ -32,31 +32,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: OIDC Token Diagnostic (debug)
-        id: oidc-debug
-        run: |
-          # Request OIDC token from GitHub's OIDC provider
-          if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
-            echo "OIDC token request vars not available"
-            exit 0
-          fi
-          TOKEN_RESPONSE=$(curl -s -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
-          ID_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.value // empty')
-          if [[ -z "$ID_TOKEN" ]]; then
-            echo "Failed to obtain OIDC token"
-            exit 0
-          fi
-          # Decode JWT payload (base64url decode middle segment)
-          PAYLOAD=$(echo "$ID_TOKEN" | cut -d'.' -f2)
-          # Add padding if needed
-          MOD=$((${#PAYLOAD} % 4))
-          if [[ $MOD -eq 2 ]]; then PAYLOAD="${PAYLOAD}=="; elif [[ $MOD -eq 3 ]]; then PAYLOAD="${PAYLOAD}="; fi
-          # Replace URL-safe chars and decode
-          DECODED=$(echo "$PAYLOAD" | tr '_-' '/+' | base64 -d 2>/dev/null || echo "decode failed")
-          echo "=== OIDC Token Claims ==="
-          echo "$DECODED" | jq -r '"iss: \(.iss)\naud: \(.aud)\nsub: \(.sub)"' 2>/dev/null || echo "$DECODED"
-
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
