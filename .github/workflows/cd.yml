@@ -24,6 +24,8 @@ jobs:
     name: '11. Build & Push to ECR'
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      image_tag: ${{ steps.vars.outputs.IMAGE_TAG }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -76,15 +78,10 @@ jobs:
           role-to-assume: ${{ env.OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get image tag from deploy job
-        id: vars
-        run: echo "IMAGE_TAG=${{ needs.deploy.outputs.IMAGE_TAG }}" >> $GITHUB_OUTPUT
-        # Note: We'll pass IMAGE_TAG via environment since outputs need explicit declaration
-
       - name: Create new Launch Template version with updated image tag
         id: lt-version
         run: |
-          IMAGE_TAG="${{ env.IMAGE_TAG }}"
+          IMAGE_TAG="${{ needs.deploy.outputs.image_tag }}"
           echo "Creating Launch Template version with IMAGE_TAG=${IMAGE_TAG}"
 
           # Get current launch template data
@@ -142,7 +139,7 @@ jobs:
 
   smoke-test:
     name: '13. Smoke Test'
-    needs: instance-refresh
+    needs: [instance-refresh, deploy]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -151,7 +148,7 @@ jobs:
       - name: Run smoke test against ALB
         env:
           ALB_DNS: ${{ env.ALB_DNS_NAME }}
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          IMAGE_TAG: ${{ needs.deploy.outputs.image_tag }}
         run: |
           chmod +x scripts/smoke-test.sh
           ./scripts/smoke-test.sh "${ALB_DNS}"
