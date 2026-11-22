@@ -149,7 +149,7 @@ main() {
   log "Starting smoke test against ALB: ${ALB_DNS}"
   log "Max retries: ${MAX_RETRIES}, Interval: ${RETRY_INTERVAL}s"
 
-  local backend_url="http://${ALB_DNS}/api${HEALTH_ENDPOINT}"
+  local backend_url="http://${ALB_DNS}${HEALTH_ENDPOINT}"
   local frontend_url="http://${ALB_DNS}${FRONTEND_ENDPOINT}"
 
   # Try health checks with retries
