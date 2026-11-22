@@ -91,7 +91,7 @@ services:
     volumes:
       - urlshortener_data:/app/data
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { if (res.statusCode !== 200) process.exit(1) }).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { res.resume(); res.on('end', () => process.exit(res.statusCode === 200 ? 0 : 1)) }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 3s
       retries: 3
