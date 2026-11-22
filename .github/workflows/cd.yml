@@ -131,6 +131,18 @@ jobs:
       - name: Start ASG Instance Refresh
         id: refresh
         run: |
+          # Check for existing in-progress refresh and cancel if needed
+          EXISTING=$(aws autoscaling describe-instance-refreshes \
+            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --query 'InstanceRefreshes[?Status==`InProgress` || Status==`Pending`].InstanceRefreshId' \
+            --output text)
+          if [[ -n "$EXISTING" ]]; then
+            echo "Cancelling existing instance refresh: $EXISTING"
+            aws autoscaling cancel-instance-refresh \
+              --auto-scaling-group-name ${{ env.ASG_NAME }} \
+              --instance-refresh-ids "$EXISTING" || true
+            sleep 10
+          fi
           REFRESH_OUTPUT=$(aws autoscaling start-instance-refresh \
             --auto-scaling-group-name ${{ env.ASG_NAME }} \
             --preferences '{"MinHealthyPercentage": 50, "InstanceWarmup": 300, "SkipMatching": true}' \
