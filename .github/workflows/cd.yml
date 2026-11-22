@@ -119,6 +119,15 @@ jobs:
           echo "NEW_LT_VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
           echo "Created Launch Template version: ${NEW_VERSION}"
 
+      - name: Set ASG Desired Capacity
+        run: |
+          # Set desired capacity to 2 (or current max if less) before instance refresh
+          aws autoscaling set-desired-capacity \
+            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --desired-capacity 2 \
+            --region ${{ env.AWS_REGION }}
+          echo "Set ASG desired capacity to 2"
+
       - name: Start ASG Instance Refresh
         id: refresh
         run: |
