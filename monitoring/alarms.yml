@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudWatch Alarms and SNS Topic for TaskFlow URL Shortener
+
+Parameters:
+  AlarmEmail:
+    Type: String
+    Description: Email address for alarm notifications
+    Default: "devops-team@example.com"
+
+  ALBName:
+    Type: String
+    Description: Application Load Balancer name
+    Default: "taskflow-alb"
+
+  ALBFullName:
+    Type: String
+    Description: Full ALB ARN suffix (app/<name>/<id>)
+    Default: "app/taskflow-alb/1472473679"
+
+  TargetGroupFullName:
+    Type: String
+    Description: Target Group ARN suffix (targetgroup/<name>/<id>)
+    Default: "targetgroup/taskflow-tg/dad74663ee8e2b40"
+
+  ASGName:
+    Type: String
+    Description: Auto Scaling Group name
+    Default: "url-shortener-asg"
+
+Resources:
+  # SNS Topic for alarms
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: devops-alerts
+      DisplayName: TaskFlow DevOps Alerts
+
+  # Email subscription to SNS topic
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  # Alarm 1: High 5xx Error Rate (>5% for 5 minutes)
+  HighErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: TaskFlow-HighErrorRate
+      AlarmDescription: >-
+        Triggers when 5xx error rate exceeds 5% of total requests for 5 minutes.
+        Indicates application or backend failures.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ALBFullName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+      Tags:
+        - Key: Project
+          Value: TaskFlow
+        - Key: Severity
+          Value: Critical
+
+  # Alarm 2: Unhealthy Targets (>0 for 2 minutes)
+  UnhealthyTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: TaskFlow-UnhealthyTargets
+      AlarmDescription: >-
+        Triggers when any target in the target group is unhealthy for 2 minutes.
+        Indicates instance or container health check failures.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ALBFullName
+        - Name: TargetGroup
+          Value: !Ref TargetGroupFullName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+      Tags:
+        - Key: Project
+          Value: TaskFlow
+        - Key: Severity
+          Value: Critical
+
+  # Alarm 3: High CPU Utilization (>80% for 5 minutes)
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: TaskFlow-HighCPU
+      AlarmDescription: Triggers when ASG average CPU exceeds 80% for 5 minutes.
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref ASGName
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+      Tags:
+        - Key: Project
+          Value: TaskFlow
+        - Key: Severity
+          Value: Warning
+
+  # Alarm 4: High Memory Utilization (>85% for 5 minutes)
+  HighMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: TaskFlow-HighMemory
+      AlarmDescription: Triggers when ASG average memory exceeds 85% for 5 minutes (requires CloudWatch Agent).
+      Namespace: CWAgent
+      MetricName: mem_used_percent
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref ASGName
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+      Tags:
+        - Key: Project
+          Value: TaskFlow
+        - Key: Severity
+          Value: Warning
+
+  # Alarm 5: ASG Capacity at Minimum (scale-in protection check)
+  ASGMinCapacityAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: TaskFlow-ASGAtMinCapacity
+      AlarmDescription: Triggers when ASG desired capacity equals minimum (potential scale-in issue).
+      Namespace: AWS/AutoScaling
+      MetricName: GroupDesiredCapacity
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref ASGName
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+      Tags:
+        - Key: Project
+          Value: TaskFlow
+        - Key: Severity
+          Value: Info
+
+Outputs:
+  AlertTopicArn:
+    Description: SNS Topic ARN for alarm notifications
+    Value: !Ref AlertTopic
+    Export:
+      Name: TaskFlow-AlertTopicArn
