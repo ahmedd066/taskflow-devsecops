@@ -84,40 +84,61 @@ jobs:
           IMAGE_TAG="${{ needs.deploy.outputs.image_tag }}"
           echo "Creating Launch Template version with IMAGE_TAG=${IMAGE_TAG}"
 
-          # Get current launch template data
-          LT_DATA=$(aws ec2 describe-launch-template-versions \
-            --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
-            --versions '$Latest' \
-            --query 'LaunchTemplateVersions[0].LaunchTemplateData' \
-            --output json)
-
-          # Update UserData with new IMAGE_TAG
-          # The user data script expects IMAGE_TAG to be set in the environment
-          # We'll use a sed replacement approach on the user data
-          CURRENT_USER_DATA=$(echo "$LT_DATA" | jq -r '.UserData // ""' | base64 -d)
-
-          # Replace IMAGE_TAG in user data (the script validates IMAGE_TAG is set)
-          NEW_USER_DATA=$(echo "$CURRENT_USER_DATA" | sed "s/IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/")
-
-          # If no IMAGE_TAG line exists, we need to add it before the validation check
-          if ! echo "$NEW_USER_DATA" | grep -q "IMAGE_TAG="; then
-            # Insert after the derived values section
-            NEW_USER_DATA=$(echo "$NEW_USER_DATA" | sed "/^# Derived values/a IMAGE_TAG=${IMAGE_TAG}")
+          # Validate image tag
+          if [[ ! "$IMAGE_TAG" =~ ^sha-[a-f0-9]+$ ]]; then
+            echo "ERROR: Invalid image tag: $IMAGE_TAG"
+            exit 1
           fi
 
-          # Encode new user data
-          ENCODED_USER_DATA=$(echo -n "$NEW_USER_DATA" | base64 -w 0)
+          # Read the actual startup script from the repository
+          if [[ ! -f infra/ec2-user-data.sh ]]; then
+            echo "ERROR: infra/ec2-user-data.sh not found"
+            exit 1
+          fi
 
-          # Create new launch template version
+          # Inject the immutable image tag into the startup script
+          USER_DATA=$(sed \
+            "s|^# IMAGE_TAG is provided at runtime via Launch Template user data (no default)$|IMAGE_TAG=\"${IMAGE_TAG}\"|" \
+            infra/ec2-user-data.sh)
+
+          # Verify that the image tag was injected
+          if ! grep -q "^IMAGE_TAG=\"${IMAGE_TAG}\"$" <<< "$USER_DATA"; then
+            echo "ERROR: IMAGE_TAG injection failed"
+            exit 1
+          fi
+
+          # Encode the complete startup script
+          ENCODED_USER_DATA=$(printf '%s' "$USER_DATA" | base64 -w 0)
+
+          # Create a new Launch Template version with complete User Data
+          LT_DATA=$(jq -n --arg userData "$ENCODED_USER_DATA" \
+            '{UserData: $userData}')
+
           NEW_VERSION=$(aws ec2 create-launch-template-version \
             --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
             --source-version '$Latest' \
-            --launch-template-data "{\"UserData\":\"${ENCODED_USER_DATA}\"}" \
+            --launch-template-data "$LT_DATA" \
             --query 'LaunchTemplateVersion.VersionNumber' \
             --output text)
 
-          echo "NEW_LT_VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "NEW_LT_VERSION=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Created Launch Template version: ${NEW_VERSION}"
+
+          # Verify the newly created version contains the startup script
+          VERIFY_DATA=$(aws ec2 describe-launch-template-versions \
+            --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
+            --versions "$NEW_VERSION" \
+            --query 'LaunchTemplateVersions[0].LaunchTemplateData.UserData' \
+            --output text)
+
+          DECODED_DATA=$(printf '%s' "$VERIFY_DATA" | base64 --decode)
+
+          if ! grep -q "^IMAGE_TAG=\"${IMAGE_TAG}\"$" <<< "$DECODED_DATA"; then
+            echo "ERROR: Launch Template User Data verification failed"
+            exit 1
+          fi
+
+          echo "Verified: complete startup script exists in Launch Template version ${NEW_VERSION}"
 
       - name: Set ASG Desired Capacity
         run: |
