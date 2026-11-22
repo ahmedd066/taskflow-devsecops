@@ -14,7 +14,7 @@ permissions:
 
 env:
   AWS_REGION: ap-southeast-2
-  AWS_ACCOUNT_ID: 078852546033
+  AWS_ACCOUNT_ID: "078852546033"
   ECR_BACKEND_REPO: url-shortener-backend
   ECR_FRONTEND_REPO: url-shortener-frontend
   LAUNCH_TEMPLATE_ID: lt-014537a1cb74e6918
@@ -60,33 +60,61 @@ jobs:
           ROLLBACK_TAG="${{ github.event.inputs.image_tag }}"
           echo "Creating Launch Template version with IMAGE_TAG=${ROLLBACK_TAG}"
 
-          # Get current launch template data
-          LT_DATA=$(aws ec2 describe-launch-template-versions \
-            --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
-            --versions '$Latest' \
-            --query 'LaunchTemplateVersions[0].LaunchTemplateData' \
-            --output json --region ${{ env.AWS_REGION }})
-
-          # Update UserData with rollback tag
-          CURRENT_USER_DATA=$(echo "$LT_DATA" | jq -r '.UserData // ""' | base64 -d)
-          NEW_USER_DATA=$(echo "$CURRENT_USER_DATA" | sed "s/IMAGE_TAG=.*/IMAGE_TAG=${ROLLBACK_TAG}/")
-
-          if ! echo "$NEW_USER_DATA" | grep -q "IMAGE_TAG="; then
-            NEW_USER_DATA=$(echo "$NEW_USER_DATA" | sed "/^# Derived values/a IMAGE_TAG=${ROLLBACK_TAG}")
+          # Validate image tag
+          if [[ ! "$ROLLBACK_TAG" =~ ^(sha-[a-f0-9]+|v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "ERROR: Invalid image tag format: $ROLLBACK_TAG"
+            exit 1
           fi
 
-          ENCODED_USER_DATA=$(echo -n "$NEW_USER_DATA" | base64 -w 0)
+          # Read the actual startup script from the repository
+          if [[ ! -f infra/ec2-user-data.sh ]]; then
+            echo "ERROR: infra/ec2-user-data.sh not found"
+            exit 1
+          fi
 
-          # Create new launch template version
+          # Inject the immutable image tag into the startup script
+          USER_DATA=$(sed \
+            "s|^# IMAGE_TAG is provided at runtime via Launch Template user data (no default)$|IMAGE_TAG=\"${ROLLBACK_TAG}\"|" \
+            infra/ec2-user-data.sh)
+
+          # Verify that the image tag was injected
+          if ! grep -q "^IMAGE_TAG=\"${ROLLBACK_TAG}\"$" <<< "$USER_DATA"; then
+            echo "ERROR: IMAGE_TAG injection failed"
+            exit 1
+          fi
+
+          # Encode the complete startup script
+          ENCODED_USER_DATA=$(printf '%s' "$USER_DATA" | base64 -w 0)
+
+          # Create a new Launch Template version with complete User Data
+          LT_DATA=$(jq -n --arg userData "$ENCODED_USER_DATA" \
+            '{UserData: $userData}')
+
           NEW_VERSION=$(aws ec2 create-launch-template-version \
             --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
             --source-version '$Latest' \
-            --launch-template-data "{\"UserData\":\"${ENCODED_USER_DATA}\"}" \
+            --launch-template-data "$LT_DATA" \
             --query 'LaunchTemplateVersion.VersionNumber' \
             --output text --region ${{ env.AWS_REGION }})
 
-          echo "NEW_LT_VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "NEW_LT_VERSION=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Created rollback Launch Template version: ${NEW_VERSION}"
+
+          # Verify the newly created version contains the startup script
+          VERIFY_DATA=$(aws ec2 describe-launch-template-versions \
+            --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
+            --versions "$NEW_VERSION" \
+            --query 'LaunchTemplateVersions[0].LaunchTemplateData.UserData' \
+            --output text --region ${{ env.AWS_REGION }})
+
+          DECODED_DATA=$(printf '%s' "$VERIFY_DATA" | base64 --decode)
+
+          if ! grep -q "^IMAGE_TAG=\"${ROLLBACK_TAG}\"$" <<< "$DECODED_DATA"; then
+            echo "ERROR: Launch Template User Data verification failed"
+            exit 1
+          fi
+
+          echo "Verified: complete startup script exists in Launch Template version ${NEW_VERSION}"
 
       - name: Start ASG Instance Refresh for Rollback
         id: refresh
@@ -101,11 +129,26 @@ jobs:
 
       - name: Wait for Instance Refresh to Complete
         run: |
-          aws autoscaling wait instance-refresh-complete \
-            --auto-scaling-group-name ${{ env.ASG_NAME }} \
-            --instance-refresh-ids ${{ steps.refresh.outputs.INSTANCE_REFRESH_ID }} \
-            --region ${{ env.AWS_REGION }}
-          echo "Rollback instance refresh completed successfully"
+          REFRESH_ID="${{ steps.refresh.outputs.INSTANCE_REFRESH_ID }}"
+          echo "Waiting for rollback instance refresh $REFRESH_ID to complete..."
+          for i in {1..60}; do
+            STATUS=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name ${{ env.ASG_NAME }} \
+              --instance-refresh-ids "$REFRESH_ID" \
+              --query 'InstanceRefreshes[0].Status' \
+              --output text --region ${{ env.AWS_REGION }})
+            echo "Instance refresh status: $STATUS"
+            if [[ "$STATUS" == "Successful" ]]; then
+              echo "Rollback instance refresh completed successfully"
+              exit 0
+            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" ]]; then
+              echo "Rollback instance refresh $STATUS"
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "Timeout waiting for rollback instance refresh"
+          exit 1
 
       - name: Run Smoke Test After Rollback
         run: |
