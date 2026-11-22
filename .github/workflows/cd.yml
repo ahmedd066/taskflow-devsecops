@@ -33,7 +33,6 @@ jobs:
           fetch-depth: 0
 
       - name: OIDC Token Diagnostic (debug)
-        if: env.ACTIONS_STEP_DEBUG == 'true' || github.event_name == 'workflow_dispatch'
         id: oidc-debug
         run: |
           # Request OIDC token from GitHub's OIDC provider
