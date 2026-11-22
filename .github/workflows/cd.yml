@@ -42,8 +42,12 @@ jobs:
         id: vars
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          echo "IMAGE_TAG=sha-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          IMAGE_TAG="sha-${SHORT_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_OUTPUT
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+          echo "Using unique immutable image tag: ${IMAGE_TAG}"
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -85,7 +89,7 @@ jobs:
           echo "Creating Launch Template version with IMAGE_TAG=${IMAGE_TAG}"
 
           # Validate image tag
-          if [[ ! "$IMAGE_TAG" =~ ^sha-[a-f0-9]+$ ]]; then
+          if [[ ! "$IMAGE_TAG" =~ ^sha-[a-f0-9]+-[0-9]+-[0-9]+$ ]]; then
             echo "ERROR: Invalid image tag: $IMAGE_TAG"
             exit 1
           fi
