@@ -131,18 +131,28 @@ jobs:
       - name: Start ASG Instance Refresh
         id: refresh
         run: |
-          # Check for existing in-progress refresh and cancel if needed
+          # Wait for any existing in-progress refresh to complete (CLI version may not support cancel)
+          echo "Checking for existing instance refresh..."
+          for i in {1..60}; do
+            EXISTING=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name ${{ env.ASG_NAME }} \
+              --query 'InstanceRefreshes[?Status==`InProgress` || Status==`Pending`].InstanceRefreshId' \
+              --output text)
+            if [[ -z "$EXISTING" ]]; then
+              echo "No in-progress refresh found"
+              break
+            fi
+            echo "Waiting for existing refresh $EXISTING to complete... (attempt $i/60)"
+            sleep 30
+          done
+          # Verify no refresh still in progress
           EXISTING=$(aws autoscaling describe-instance-refreshes \
             --auto-scaling-group-name ${{ env.ASG_NAME }} \
             --query 'InstanceRefreshes[?Status==`InProgress` || Status==`Pending`].InstanceRefreshId' \
             --output text)
           if [[ -n "$EXISTING" ]]; then
-            echo "Cancelling existing instance refresh: $EXISTING"
-            # cancel-instance-refresh uses --instance-refresh-id (singular)
-            aws autoscaling cancel-instance-refresh \
-              --auto-scaling-group-name ${{ env.ASG_NAME }} \
-              --instance-refresh-id "$EXISTING" || true
-            sleep 10
+            echo "ERROR: Instance refresh still in progress after timeout"
+            exit 1
           fi
           REFRESH_OUTPUT=$(aws autoscaling start-instance-refresh \
             --auto-scaling-group-name ${{ env.ASG_NAME }} \
