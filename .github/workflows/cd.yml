@@ -11,7 +11,7 @@ permissions:
 
 env:
   AWS_REGION: ap-southeast-2
-  AWS_ACCOUNT_ID: 078852546033
+  AWS_ACCOUNT_ID: "078852546033"
   ECR_BACKEND_REPO: url-shortener-backend
   ECR_FRONTEND_REPO: url-shortener-frontend
   LAUNCH_TEMPLATE_ID: lt-014537a1cb74e6918
