@@ -1,0 +1,118 @@
+name: Manual Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to rollback to (e.g., sha-abc1234 or v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+  AWS_ACCOUNT_ID: 078852546033
+  ECR_BACKEND_REPO: url-shortener-backend
+  ECR_FRONTEND_REPO: url-shortener-frontend
+  LAUNCH_TEMPLATE_ID: lt-014537a1cb74e6918
+  ASG_NAME: url-shortener-asg
+  ALB_DNS_NAME: taskflow-alb-1472473679.ap-southeast-2.elb.amazonaws.com
+  OIDC_ROLE_ARN: arn:aws:iam::078852546033:role/github-actions-deploy
+
+jobs:
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate image tag exists in ECR (backend)
+        run: |
+          aws ecr describe-images \
+            --repository-name ${{ env.ECR_BACKEND_REPO }} \
+            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'imageDetails[0].imageTags[0]' \
+            --output text
+
+      - name: Validate image tag exists in ECR (frontend)
+        run: |
+          aws ecr describe-images \
+            --repository-name ${{ env.ECR_FRONTEND_REPO }} \
+            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'imageDetails[0].imageTags[0]' \
+            --output text
+
+      - name: Create new Launch Template version with rollback image tag
+        id: lt-version
+        run: |
+          ROLLBACK_TAG="${{ github.event.inputs.image_tag }}"
+          echo "Creating Launch Template version with IMAGE_TAG=${ROLLBACK_TAG}"
+
+          # Get current launch template data
+          LT_DATA=$(aws ec2 describe-launch-template-versions \
+            --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
+            --versions '$Latest' \
+            --query 'LaunchTemplateVersions[0].LaunchTemplateData' \
+            --output json --region ${{ env.AWS_REGION }})
+
+          # Update UserData with rollback tag
+          CURRENT_USER_DATA=$(echo "$LT_DATA" | jq -r '.UserData // ""' | base64 -d)
+          NEW_USER_DATA=$(echo "$CURRENT_USER_DATA" | sed "s/IMAGE_TAG=.*/IMAGE_TAG=${ROLLBACK_TAG}/")
+
+          if ! echo "$NEW_USER_DATA" | grep -q "IMAGE_TAG="; then
+            NEW_USER_DATA=$(echo "$NEW_USER_DATA" | sed "/^# Derived values/a IMAGE_TAG=${ROLLBACK_TAG}")
+          fi
+
+          ENCODED_USER_DATA=$(echo -n "$NEW_USER_DATA" | base64 -w 0)
+
+          # Create new launch template version
+          NEW_VERSION=$(aws ec2 create-launch-template-version \
+            --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
+            --source-version '$Latest' \
+            --launch-template-data "{\"UserData\":\"${ENCODED_USER_DATA}\"}" \
+            --query 'LaunchTemplateVersion.VersionNumber' \
+            --output text --region ${{ env.AWS_REGION }})
+
+          echo "NEW_LT_VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "Created rollback Launch Template version: ${NEW_VERSION}"
+
+      - name: Start ASG Instance Refresh for Rollback
+        id: refresh
+        run: |
+          REFRESH_OUTPUT=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --preferences '{"MinHealthyPercentage": 50, "InstanceWarmup": 300, "SkipMatching": true}' \
+            --query 'InstanceRefreshId' \
+            --output text --region ${{ env.AWS_REGION }})
+          echo "INSTANCE_REFRESH_ID=${REFRESH_OUTPUT}" >> $GITHUB_OUTPUT
+          echo "Started rollback instance refresh: ${REFRESH_OUTPUT}"
+
+      - name: Wait for Instance Refresh to Complete
+        run: |
+          aws autoscaling wait instance-refresh-complete \
+            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --instance-refresh-ids ${{ steps.refresh.outputs.INSTANCE_REFRESH_ID }} \
+            --region ${{ env.AWS_REGION }}
+          echo "Rollback instance refresh completed successfully"
+
+      - name: Run Smoke Test After Rollback
+        run: |
+          chmod +x scripts/smoke-test.sh
+          ./scripts/smoke-test.sh "${{ env.ALB_DNS_NAME }}"
+
+      - name: Rollback Complete
+        run: |
+          echo "✅ Rollback to ${{ github.event.inputs.image_tag }} completed successfully"
+          echo "Application is healthy at http://${{ env.ALB_DNS_NAME }}"

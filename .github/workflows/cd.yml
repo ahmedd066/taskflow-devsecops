@@ -1,0 +1,163 @@
+name: CD Deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+  AWS_ACCOUNT_ID: 078852546033
+  ECR_BACKEND_REPO: url-shortener-backend
+  ECR_FRONTEND_REPO: url-shortener-frontend
+  LAUNCH_TEMPLATE_ID: lt-014537a1cb74e6918
+  ASG_NAME: url-shortener-asg
+  ALB_DNS_NAME: taskflow-alb-1472473679.ap-southeast-2.elb.amazonaws.com
+  OIDC_ROLE_ARN: arn:aws:iam::078852546033:role/github-actions-deploy
+
+jobs:
+  deploy:
+    name: '11. Build & Push to ECR'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      image_tag: ${{ steps.vars.outputs.IMAGE_TAG }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get short Git SHA for image tag
+        id: vars
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "IMAGE_TAG=sha-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+            docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+      - name: Build and push backend image
+        run: |
+          docker build -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_BACKEND_REPO }}:${{ steps.vars.outputs.IMAGE_TAG }} ./backend
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_BACKEND_REPO }}:${{ steps.vars.outputs.IMAGE_TAG }}
+
+      - name: Build and push frontend image
+        run: |
+          docker build -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:${{ steps.vars.outputs.IMAGE_TAG }} ./frontend
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:${{ steps.vars.outputs.IMAGE_TAG }}
+
+      - name: Output image tag for next jobs
+        run: echo "IMAGE_TAG=${{ steps.vars.outputs.IMAGE_TAG }}" >> $GITHUB_ENV
+
+  instance-refresh:
+    name: '12. ASG Instance Refresh'
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create new Launch Template version with updated image tag
+        id: lt-version
+        run: |
+          IMAGE_TAG="${{ needs.deploy.outputs.image_tag }}"
+          echo "Creating Launch Template version with IMAGE_TAG=${IMAGE_TAG}"
+
+          # Get current launch template data
+          LT_DATA=$(aws ec2 describe-launch-template-versions \
+            --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
+            --versions '$Latest' \
+            --query 'LaunchTemplateVersions[0].LaunchTemplateData' \
+            --output json)
+
+          # Update UserData with new IMAGE_TAG
+          # The user data script expects IMAGE_TAG to be set in the environment
+          # We'll use a sed replacement approach on the user data
+          CURRENT_USER_DATA=$(echo "$LT_DATA" | jq -r '.UserData // ""' | base64 -d)
+
+          # Replace IMAGE_TAG in user data (the script validates IMAGE_TAG is set)
+          NEW_USER_DATA=$(echo "$CURRENT_USER_DATA" | sed "s/IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/")
+
+          # If no IMAGE_TAG line exists, we need to add it before the validation check
+          if ! echo "$NEW_USER_DATA" | grep -q "IMAGE_TAG="; then
+            # Insert after the derived values section
+            NEW_USER_DATA=$(echo "$NEW_USER_DATA" | sed "/^# Derived values/a IMAGE_TAG=${IMAGE_TAG}")
+          fi
+
+          # Encode new user data
+          ENCODED_USER_DATA=$(echo -n "$NEW_USER_DATA" | base64 -w 0)
+
+          # Create new launch template version
+          NEW_VERSION=$(aws ec2 create-launch-template-version \
+            --launch-template-id ${{ env.LAUNCH_TEMPLATE_ID }} \
+            --source-version '$Latest' \
+            --launch-template-data "{\"UserData\":\"${ENCODED_USER_DATA}\"}" \
+            --query 'LaunchTemplateVersion.VersionNumber' \
+            --output text)
+
+          echo "NEW_LT_VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "Created Launch Template version: ${NEW_VERSION}"
+
+      - name: Set ASG Desired Capacity
+        run: |
+          # Set desired capacity to 2 (or current max if less) before instance refresh
+          aws autoscaling set-desired-capacity \
+            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --desired-capacity 2 \
+            --region ${{ env.AWS_REGION }}
+          echo "Set ASG desired capacity to 2"
+
+      - name: Start ASG Instance Refresh
+        id: refresh
+        run: |
+          REFRESH_OUTPUT=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --preferences '{"MinHealthyPercentage": 50, "InstanceWarmup": 300, "SkipMatching": true}' \
+            --query 'InstanceRefreshId' \
+            --output text)
+          echo "INSTANCE_REFRESH_ID=${REFRESH_OUTPUT}" >> $GITHUB_OUTPUT
+          echo "Started instance refresh: ${REFRESH_OUTPUT}"
+
+      - name: Wait for Instance Refresh to Complete
+        run: |
+          aws autoscaling wait instance-refresh-complete \
+            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --instance-refresh-ids ${{ steps.refresh.outputs.INSTANCE_REFRESH_ID }}
+          echo "Instance refresh completed successfully"
+
+  smoke-test:
+    name: '13. Smoke Test'
+    needs: [instance-refresh, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run smoke test against ALB
+        env:
+          ALB_DNS: ${{ env.ALB_DNS_NAME }}
+          IMAGE_TAG: ${{ needs.deploy.outputs.image_tag }}
+        run: |
+          chmod +x scripts/smoke-test.sh
+          ./scripts/smoke-test.sh "${ALB_DNS}"
