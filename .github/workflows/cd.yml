@@ -138,9 +138,10 @@ jobs:
             --output text)
           if [[ -n "$EXISTING" ]]; then
             echo "Cancelling existing instance refresh: $EXISTING"
+            # cancel-instance-refresh uses --instance-refresh-id (singular)
             aws autoscaling cancel-instance-refresh \
               --auto-scaling-group-name ${{ env.ASG_NAME }} \
-              --instance-refresh-ids "$EXISTING" || true
+              --instance-refresh-id "$EXISTING" || true
             sleep 10
           fi
           REFRESH_OUTPUT=$(aws autoscaling start-instance-refresh \
