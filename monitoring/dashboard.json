@@ -8,10 +8,10 @@
       "height": 6,
       "properties": {
         "metrics": [
-          [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "app/taskflow-alb/1472473679", { "stat": "Sum", "period": 60, "label": "Request Count" } ],
-          [ "AWS/ApplicationELB", "HTTPCode_Target_2XX_Count", "LoadBalancer", "app/taskflow-alb/1472473679", { "stat": "Sum", "period": 60, "label": "2xx Responses" } ],
-          [ "AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", "app/taskflow-alb/1472473679", { "stat": "Sum", "period": 60, "label": "4xx Responses" } ],
-          [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "app/taskflow-alb/1472473679", { "stat": "Sum", "period": 60, "label": "5xx Responses" } ]
+          [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", { "stat": "Sum", "period": 60, "label": "Request Count" } ],
+          [ "AWS/ApplicationELB", "HTTPCode_Target_2XX_Count", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", { "stat": "Sum", "period": 60, "label": "2xx Responses" } ],
+          [ "AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", { "stat": "Sum", "period": 60, "label": "4xx Responses" } ],
+          [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", { "stat": "Sum", "period": 60, "label": "5xx Responses" } ]
         ],
         "view": "timeSeries",
         "stacked": false,
@@ -34,9 +34,9 @@
       "height": 6,
       "properties": {
         "metrics": [
-          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/taskflow-alb/1472473679", { "stat": "Average", "period": 60, "label": "Avg Latency" } ],
-          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/taskflow-alb/1472473679", { "stat": "ExtendedStatistic", "extendedStatistic": "p90", "period": 60, "label": "p90 Latency" } ],
-          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/taskflow-alb/1472473679", { "stat": "ExtendedStatistic", "extendedStatistic": "p99", "period": 60, "label": "p99 Latency" } ]
+          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", { "stat": "p50", "period": 60, "label": "p50 Latency" } ],
+          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", { "stat": "p90", "period": 60, "label": "p90 Latency" } ],
+          [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", { "stat": "p99", "period": 60, "label": "p99 Latency" } ]
         ],
         "view": "timeSeries",
         "stacked": false,
@@ -59,8 +59,8 @@
       "height": 6,
       "properties": {
         "metrics": [
-          [ "AWS/ApplicationELB", "UnHealthyHostCount", "LoadBalancer", "app/taskflow-alb/1472473679", "TargetGroup", "targetgroup/taskflow-tg/dad74663ee8e2b40", { "stat": "Maximum", "period": 60, "label": "Unhealthy Hosts" } ],
-          [ "AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", "app/taskflow-alb/1472473679", "TargetGroup", "targetgroup/taskflow-tg/dad74663ee8e2b40", { "stat": "Maximum", "period": 60, "label": "Healthy Hosts" } ]
+          [ "AWS/ApplicationELB", "UnHealthyHostCount", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", "TargetGroup", "targetgroup/taskflow-tg/dad74663ee8e2b40", { "stat": "Maximum", "period": 60, "label": "Unhealthy Hosts" } ],
+          [ "AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", "app/taskflow-alb/b4eb96b2a295e3cc", "TargetGroup", "targetgroup/taskflow-tg/dad74663ee8e2b40", { "stat": "Maximum", "period": 60, "label": "Healthy Hosts" } ]
         ],
         "view": "timeSeries",
         "stacked": false,
@@ -108,18 +108,18 @@
       "height": 6,
       "properties": {
         "metrics": [
-          [ "CWAgent", "mem_used_percent", "AutoScalingGroupName", "url-shortener-asg", { "stat": "Average", "period": 60, "label": "Avg Memory %" } ],
-          [ "CWAgent", "mem_used_percent", "AutoScalingGroupName", "url-shortener-asg", { "stat": "Maximum", "period": 60, "label": "Max Memory %" } ],
-          [ "CWAgent", "mem_available", "AutoScalingGroupName", "url-shortener-asg", { "stat": "Average", "period": 60, "label": "Available Memory (MB)" } ]
+          [ "AWS/EC2", "NetworkIn", "AutoScalingGroupName", "url-shortener-asg", { "stat": "Average", "period": 60, "label": "Network In (Bytes)" } ],
+          [ "AWS/EC2", "NetworkOut", "AutoScalingGroupName", "url-shortener-asg", { "stat": "Average", "period": 60, "label": "Network Out (Bytes)" } ],
+          [ "AWS/EC2", "CPUUtilization", "AutoScalingGroupName", "url-shortener-asg", { "stat": "Average", "period": 60, "label": "CPU Utilization %" } ]
         ],
         "view": "timeSeries",
         "stacked": false,
         "region": "ap-southeast-2",
-        "title": "ASG Memory Utilization (CloudWatch Agent)",
+        "title": "ASG Network I/O & CPU",
         "period": 60,
         "yAxis": {
           "left": {
-            "label": "Percent / MB",
+            "label": "Bytes / Percent",
             "min": 0
           }
         }
