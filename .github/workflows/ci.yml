@@ -118,7 +118,7 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
             -Dsonar.sources=backend/src,frontend
             -Dsonar.tests=backend/src/test
-            -Dsonar.exclusions=backend/src/test/**
+            -Dsonar.exclusions=backend/src/test/**,.github/**,infra/**,scripts/**,monitoring/**,docs/**,build-test.sh,**/Dockerfile
             -Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info
 
   snyk:
